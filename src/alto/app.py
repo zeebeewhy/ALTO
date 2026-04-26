@@ -4,7 +4,13 @@ Theory-backed, self-supervised, minimal viable product.
 """
 
 import streamlit as st
+from dotenv import load_dotenv
+from alto.config import get_config
 from alto.engine import Engine
+
+# 加载 .env 配置，供前端自动填充默认值
+load_dotenv()
+_cfg = get_config()
 
 st.set_page_config(
     page_title="Language Learning",
@@ -82,25 +88,32 @@ if st.session_state.mode == "setup":
     - **Self-supervised**: Zero manual annotation needed
     """)
 
+    # 从 .env 读取默认值，自动填充表单
+    default_base_url = _cfg.llm.base_url or "https://api.moonshot.cn/v1"
+    default_model = _cfg.llm.model_name or "moonshot-v1-8k"
+    default_key = _cfg.llm.api_key or ""
+    has_env_key = bool(default_key)
+
     with st.form("config"):
         col1, col2 = st.columns(2)
         with col1:
-            base_url = st.text_input("API Base URL", value="https://api.moonshot.cn/v1")
-            api_key = st.text_input("API Key", type="password")
-            model_name = st.text_input("Model", value="kimi-latest")
+            base_url = st.text_input("API Base URL", value=default_base_url)
+            api_key = st.text_input("API Key", type="password", value=default_key)
+            model_name = st.text_input("Model", value=default_model)
         with col2:
             user_id = st.text_input("Learner ID", value="learner_001")
             st.markdown("<br>", unsafe_allow_html=True)
             submitted = st.form_submit_button("🚀 Launch", use_container_width=True)
 
         if submitted:
-            if not api_key:
-                st.error("API Key is required")
+            effective_key = api_key or default_key
+            if not effective_key:
+                st.error("API Key is required（请在 .env 或上方输入框中填入）")
             else:
                 try:
                     st.session_state.engine = Engine(
                         user_id=user_id,
-                        api_key=api_key,
+                        api_key=effective_key,
                         base_url=base_url,
                         model_name=model_name,
                     )
@@ -145,7 +158,25 @@ elif st.session_state.mode == "chat":
                     )
 
                 st.divider()
-                st.caption(f"Session: {dash['interactions']} interactions")
+
+                # Conversation Context
+                conv = dash.get("conversation", {})
+                if conv.get("topic") or conv.get("summary"):
+                    st.markdown("**🗣️ Conversation**")
+                    if conv.get("topic"):
+                        st.caption(f"Topic: {conv['topic']}")
+                    if conv.get("mood"):
+                        st.caption(f"Mood: {conv['mood']}")
+                    if conv.get("summary"):
+                        with st.expander("Summary"):
+                            st.caption(conv["summary"])
+                    if conv.get("key_facts"):
+                        with st.expander("Key Facts"):
+                            for f in conv["key_facts"]:
+                                st.caption(f"• {f['fact']}")
+                    st.divider()
+
+                st.caption(f"Session: {dash['interactions']} interactions | Turns: {conv.get('total_turns', 0)}")
 
                 if st.button("🔄 Reset Memory", type="secondary"):
                     import shutil
@@ -289,20 +320,28 @@ elif st.session_state.mode == "teach":
                     else:
                         st.success("🎉 You're getting comfortable with this pattern!")
                         if st.button("↩ Return to Chat", use_container_width=True):
+                            with st.spinner("Wrapping up..."):
+                                result = st.session_state.engine.exit_teaching()
                             st.session_state.mode = "chat"
                             st.session_state.lesson = None
                             st.session_state.target_cxn = None
                             st.session_state.messages.append({
                                 "role": "assistant",
-                                "content": f"Great work on '{target}'! Let's keep chatting.",
+                                "content": result.get("reply", "Let's keep chatting!"),
                             })
                             st.rerun()
 
         with col_back:
             if st.button("↩ Back to Chat", use_container_width=True):
+                with st.spinner("Wrapping up..."):
+                    result = st.session_state.engine.exit_teaching()
                 st.session_state.mode = "chat"
                 st.session_state.lesson = None
                 st.session_state.target_cxn = None
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": result.get("reply", "Let's keep chatting!"),
+                })
                 st.rerun()
 
     else:

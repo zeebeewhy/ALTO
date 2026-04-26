@@ -1,7 +1,7 @@
 """Main Engine: orchestrates all layers into a complete learning loop.
 
 Architecture:
-  L4 DialogueAgent ──→ natural conversation
+  L4 DialogueAgent ──→ natural conversation (with layered context)
   L3 ConstructionDiagnosis ──→ neuro-symbolic error analysis
   L2 Memory (declarative + procedural + working)
   L1 JSON persistence
@@ -44,13 +44,20 @@ class Engine:
 
         # L1 + L2: Memory systems
         self.declarative = DeclarativeMemory(user_id)
-        self.working = WorkingMemory()
+        self.working = WorkingMemory(
+            user_id=user_id,
+            storage_path=cfg.memory.storage_path,
+        )
 
         # L3: Neuro-symbolic diagnosis
         self.diagnosis = ConstructionDiagnosis()
 
-        # L4: LLM agents
-        self.dialogue = DialogueAgent(self.client, self.model)
+        # L4: LLM agents (DialogueAgent now owns conversation context)
+        self.dialogue = DialogueAgent(
+            self.client,
+            self.model,
+            conversation_context=self.working.conversation,
+        )
         self.pedagogical = PedagogicalAgent(self.client, self.model)
 
         # L0: Orchestrator
@@ -69,6 +76,9 @@ class Engine:
         Returns:
             Dict with keys: mode, reply, should_teach, suggested_target, diagnosis
         """
+        # Ensure conversation phase is chat
+        self.working.conversation.set_phase("chat")
+
         # L3: Diagnose
         report = self.diagnosis.diagnose(
             sentence,
@@ -83,24 +93,24 @@ class Engine:
 
         # L4: Generate dialogue response
         if decision["should_teach"] and report.target_cxn and report.error_type != "none":
-            # Error detected — suggest teaching transition
-            reply = (
-                f"I noticed something interesting in your use of 「{report.target_cxn}」. "
-                f"{report.explanation} Would you like to practice this pattern?"
+            # Error detected — generate a natural teaching transition
+            reply = self.dialogue.generate_transition(
+                from_phase="chat",
+                to_phase="teach",
+                target_cxn=report.target_cxn,
             )
         else:
-            # Normal conversation
-            history = [
-                {"role": t["role"], "content": t["content"]}
-                for t in self.working.get_recent_turns(6)
-            ]
+            # Normal conversation with layered context
             reply = self.dialogue.chat(
                 sentence,
-                history,
                 system_hint=decision.get("system_hint"),
             )
 
         self.working.push_turn("assistant", reply)
+
+        # Background: refresh conversation context (summary, facts, topic, mood)
+        # This is lightweight and does not block the response already sent.
+        self.dialogue.update_conversation_context()
 
         return {
             "mode": "chat",
@@ -117,9 +127,10 @@ class Engine:
             cxn_id: Target construction ID
 
         Returns:
-            Dict with mode, target_cxn, activation, lesson
+            Dict with mode, target_cxn, activation, lesson, transition
         """
         self.working.current_target = cxn_id
+        self.working.conversation.set_phase("transition")
 
         state = self.declarative.get_state(cxn_id)
         if state is None:
@@ -127,20 +138,30 @@ class Engine:
 
         recent_errors = state.error_patterns[-3:] if state else []
 
+        # L4: Generate a natural transition into teaching
+        transition_msg = self.dialogue.generate_transition(
+            from_phase="chat",
+            to_phase="teach",
+            target_cxn=cxn_id,
+        )
+
         # L4: Generate lesson material
         lesson = self.pedagogical.generate_lesson(cxn_id, state, recent_errors)
 
         self.working.push_turn(
             "assistant",
-            f"[Teaching mode: {cxn_id}]",
-            {"lesson": lesson.model_dump()},
+            f"[Teaching: {cxn_id}] {transition_msg}",
+            {"lesson": lesson.model_dump(), "transition": transition_msg},
         )
+
+        self.working.conversation.set_phase("teach")
 
         return {
             "mode": "teach",
             "target_cxn": cxn_id,
             "activation": state.activation,
             "lesson": lesson.model_dump(),
+            "transition": transition_msg,
         }
 
     def evaluate_exercise(self, learner_answer: str) -> Dict:
@@ -155,6 +176,8 @@ class Engine:
         target = self.working.current_target
         if not target:
             return {"error": "No active teaching target"}
+
+        self.working.conversation.set_phase("evaluate")
 
         # L3: Diagnose the answer against target construction
         report = self.diagnosis.diagnose(
@@ -193,12 +216,35 @@ class Engine:
 
         new_state = self.declarative.get_state(target)
 
+        self.working.conversation.set_phase("teach")
+
         return {
             "success": success,
             "feedback": feedback_result["feedback"],
             "diagnosis": report.model_dump(),
             "new_activation": new_state.activation if new_state else 0.0,
             "should_continue": not success or (new_state and new_state.activation < 0.85),
+        }
+
+    def exit_teaching(self) -> Dict:
+        """Exit teaching mode and return to chat with a natural transition."""
+        target = self.working.current_target
+
+        self.working.conversation.set_phase("transition")
+
+        transition_msg = self.dialogue.generate_transition(
+            from_phase="teach",
+            to_phase="chat",
+            target_cxn=target,
+        )
+
+        self.working.current_target = None
+        self.working.push_turn("assistant", transition_msg)
+        self.working.conversation.set_phase("chat")
+
+        return {
+            "mode": "chat",
+            "reply": transition_msg,
         }
 
     def get_dashboard_data(self) -> Dict:
@@ -219,6 +265,10 @@ class Engine:
                 ),
             })
 
+        # Conversation context for the dashboard
+        conv = self.working.conversation
+        conv_state = conv.state
+
         return {
             "user_id": self.user_id,
             "session_duration": int(
@@ -229,4 +279,16 @@ class Engine:
             "constructions": constructions,
             "current_target": self.working.current_target,
             "pending_errors": len(self.working.pending_errors),
+            # New: conversation context
+            "conversation": {
+                "phase": conv_state.phase,
+                "topic": conv_state.current_topic,
+                "summary": conv_state.session_summary,
+                "mood": conv_state.user_mood,
+                "key_facts": [
+                    {"fact": kf.fact, "category": kf.category}
+                    for kf in conv_state.key_facts[-5:]
+                ],
+                "total_turns": conv._turn_counter,
+            },
         }

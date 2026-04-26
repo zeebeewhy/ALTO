@@ -8,7 +8,7 @@
 4. 编排器决策逻辑
 
 用法：
-    python scripts/test_backend.py
+    uv run python scripts/test_backend.py
 """
 
 import sys
@@ -202,11 +202,11 @@ def main():
         print("🎉 ALL TESTS PASSED — Backend logic is solid")
         print("=" * 50)
         print("\nNext steps:")
-        print("  1. pip install -e .")
-        print("  2. python -m spacy download en_core_web_sm")
+        print("  1. uv sync")
+        print("  2. uv run python -m spacy download en_core_web_sm")
         print("  3. Create .env with your API key")
-        print("  4. python scripts/test_connection.py")
-        print("  5. streamlit run src/alto/app.py")
+        print("  4. uv run python scripts/test_connection.py")
+        print("  5. uv run streamlit run src/alto/app.py")
         return 0
     else:
         print("❌ SOME TESTS FAILED")

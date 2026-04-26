@@ -20,9 +20,9 @@
 
 | 组件 | 为什么需要 | 操作 |
 |------|-----------|------|
-| spaCy 英语模型 | L3 符号诊断的依存分析 | `python -m spacy download en_core_web_sm` |
+| spaCy 英语模型 | L3 符号诊断的依存分析 | `uv run python -m spacy download en_core_web_sm` |
 | LLM API Key | L4 对话生成 + 诊断确认 | 在 `.env` 填入 Key |
-| Streamlit | 前端界面 | `pip install streamlit` |
+| Streamlit | 前端界面 | `uv add streamlit`（已由 pyproject.toml 声明） |
 
 **结论**：后端逻辑已经 solid，但完整运行需要你在本地装依赖 + 配 Key。这是正常的——任何 AI 项目都需要这步。
 
@@ -34,45 +34,70 @@
 
 | 项目 | 要求 | 说明 |
 |------|------|------|
-| Python | ≥ 3.10 | 3.12 已验证 |
+| Python | ≥ 3.10 | uv 会自动下载安装缺失的版本 |
 | 操作系统 | macOS / Linux / Windows WSL | 纯 Python，跨平台 |
 | 内存 | 4GB+ | spaCy + Streamlit 占用约 500MB |
 | 磁盘 | 500MB 可用 | 模型 + 依赖 |
-| 网络 | 能访问 Moonshot/OpenAI API | 模型不部署本地 |
+| 网络 | 能访问 LLM Provider API | 模型不部署本地 |
 
-### 开发依赖安装
+### 工具链
+
+| 工具 | 用途 | 安装 |
+|------|------|------|
+| **uv** | Python 包管理器（替代 pip + venv） | [官方安装](https://docs.astral.sh/uv/getting-started/installation/) |
+| **Git** | 版本控制 | 系统自带或官网下载 |
+
+### 首次环境搭建
 
 ```bash
 cd project_directory
 
-# 1. 虚拟环境（必须）
-python -m venv .venv
-source .venv/bin/activate  # Linux/Mac
-# .venv\Scripts\activate    # Windows
+# 1. 同步依赖（uv 自动创建 .venv + 安装所有包）
+uv sync
 
-# 2. 安装项目 + 所有依赖
-pip install -e .
+# 2. 下载 spaCy 英语模型
+uv run python -m spacy download en_core_web_sm
 
-# 3. 下载 spaCy 模型
-python -m spacy download en_core_web_sm
+# 3. 验证后端逻辑（不需要 API Key）
+uv run python scripts/test_backend.py
 
-# 4. 验证后端逻辑（不需要 Key）
-python scripts/test_backend.py
-
-# 5. 配置 API Key
+# 4. 配置 API Key
 cp .env.example .env
-# 编辑 .env，填入你的 Key
+# 编辑 .env，填入对应 Provider 的 Key
 
-# 6. 验证 API 连通性（需要 Key）
-python scripts/test_connection.py
+# 5. 验证 API 连通性（需要 Key）
+uv run python scripts/test_connection.py
 
-# 7. 启动前端
-streamlit run src/alto/app.py
+# 6. 启动前端
+uv run streamlit run src/alto/app.py
 ```
 
 ---
 
-## 三、AI CLI 工具链（核心问题：如何像专业开发者一样迭代）
+## 三、uv 日常命令速查
+
+| 任务 | 旧方式（pip） | uv 方式 |
+|------|--------------|---------|
+| 创建虚拟环境 | `python -m venv .venv` | **无需手动创建**，`uv sync` 自动处理 |
+| 安装依赖 | `pip install -r requirements.txt` | `uv sync`（从 `pyproject.toml` + `uv.lock`） |
+| 添加新包 | `pip install <pkg>` | `uv add <pkg>`（自动更新 pyproject.toml + lock） |
+| 添加开发包 | `pip install --dev <pkg>` | `uv add --dev <pkg>` |
+| 移除包 | `pip uninstall <pkg>` | `uv remove <pkg>` |
+| 运行脚本 | `source .venv/bin/activate && python script.py` | `uv run python script.py`（无需激活） |
+| 运行 pytest | `pytest` | `uv run pytest` |
+| 运行 black | `black .` | `uv run black .` |
+| 导出 requirements | `pip freeze > requirements.txt` | `uv export --format requirements-txt` |
+
+### 为什么用 uv 而不是 pip
+
+- **速度**：依赖解析和安装比 pip 快 10–100 倍
+- **锁文件**：`uv.lock` 精确锁定所有依赖版本，团队成员环境完全一致
+- **无需激活**：`uv run` 自动在正确的虚拟环境中执行，告别 `source .venv/bin/activate`
+- **单工具**：替代 pip + venv + pip-tools + poetry，减少心智负担
+
+---
+
+## 四、AI CLI 工具链（核心问题：如何像专业开发者一样迭代）
 
 龙虾（LobeChat）这样的项目不是一个人手写几万行代码完成的。核心开发模式是：**AI 辅助编码 + 快速验证循环**。
 
@@ -95,21 +120,18 @@ streamlit run src/alto/app.py
 3. **Git 集成**：每次修改自动提交，方便回滚
 4. **支持国内模型**：可以配置 Moonshot/Kimi 作为后端
 
-**Kimi Code CLI** 作为补充：当你需要深入讨论架构设计、问理论问题、写文档时使用。
-
 ### Aider 配置（使用 Kimi 作为后端）
 
 ```bash
 # 安装
-pip install aider-chat
+uv add --dev aider-chat
 
-# 配置环境变量
+# 配置环境变量（可在 .env 中添加）
 export OPENAI_API_KEY=sk-your-key
 export OPENAI_API_BASE=https://api.moonshot.cn/v1
 
 # 启动（在项目根目录）
-cd project_directory
-aider --model openai/kimi-latest --editor-model openai/kimi-latest
+uv run aider --model openai/kimi-latest --editor-model openai/kimi-latest
 
 # Aider 会读取所有代码文件，你可以在聊天中直接说：
 # "给 diagnostic.py 的 fallback 方法增加一个处理介词短语省略的规则"
@@ -146,7 +168,7 @@ aider --model openai/kimi-latest --editor-model openai/kimi-latest
 
 ---
 
-## 四、测试策略
+## 五、测试策略
 
 ### 三层测试金字塔
 
@@ -194,28 +216,26 @@ aider --model openai/kimi-latest --editor-model openai/kimi-latest
 
 ```bash
 # 后端逻辑（不需要 Key，秒级）
-python scripts/test_backend.py
+uv run python scripts/test_backend.py
 
 # API 连通（需要 Key，秒级）
-python scripts/test_connection.py
+uv run python scripts/test_connection.py
 
-# pytest 完整套件（需要安装 pytest）
-pip install pytest
-pytest tests/
+# pytest 完整套件
+uv run pytest
 
 # 带覆盖率报告
-pytest --cov=src/alto tests/
+uv run pytest --cov=src/alto tests/
 ```
 
 ---
 
-## 五、逐步完善路线图
+## 六、逐步完善路线图
 
 ### Phase 0：基础验证（你现在在这）
 
 - [x] 五层架构代码完成
 - [x] 后端逻辑测试通过
-- [x] 启动脚本（start.sh / start.bat）
 - [ ] 本地安装依赖并跑通完整流程（需要你操作）
 
 **目标**：确认"自由对话 → 检测错误 → 进入教学 → 练习 → 回到对话"这个循环能跑通。
@@ -243,7 +263,7 @@ pytest --cov=src/alto tests/
 
 ### Phase 2：引入真实 FCG（2-4 周）
 
-1. 安装 PyFCG：`pip install pyfcg`
+1. 安装 PyFCG：`uv add pyfcg`
 2. 替换轻量诊断器的 spaCy 部分为 FCG 解析
 3. 比较 FCG 和 LLM 零样本的诊断结果，建立"诊断协议"
 
@@ -257,46 +277,48 @@ pytest --cov=src/alto tests/
 
 ### Phase 4：多语言 + 扩展（6-8 周）
 
-1. C2xG 作为构式发现前端
+1. C2xG 作为构式发现前端：`uv add c2xg`
 2. 多语言支持（spaCy 多语言模型）
 3. 部署选项（可选）：桌面应用（PyInstaller）、本地 API 服务（FastAPI）
 
 ---
 
-## 六、每日开发循环（推荐）
+## 七、每日开发循环（推荐）
 
 ```bash
 # 1. 进入项目
 cd project_directory
-source .venv/bin/activate
 
 # 2. 拉取最新代码（如果你有 Git 仓库）
 git pull
 
-# 3. 运行测试确认基准
-python scripts/test_backend.py
+# 3. 同步依赖（确保与 lockfile 一致）
+uv sync
 
-# 4. 启动 Aider 或 Kimi CLI 进行开发
-aider --model openai/kimi-latest
+# 4. 运行测试确认基准
+uv run python scripts/test_backend.py
 
-# 5. 在 Aider 中：
+# 5. 启动 Aider 或 Kimi CLI 进行开发
+uv run aider --model openai/kimi-latest
+
+# 6. 在 Aider 中：
 #    - 描述你要做的修改
 #    - 让 AI 生成代码
 #    - 自动运行测试
 #    - 提交 Git
 
-# 6. 手动验证（需要 Key 时）
-streamlit run src/alto/app.py
+# 7. 手动验证（需要 Key 时）
+uv run streamlit run src/alto/app.py
 # 在浏览器里测试实际对话
 
-# 7. 提交 & 记录
+# 8. 提交 & 记录
 git add .
 git commit -m "feat: add passive construction fallback"
 ```
 
 ---
 
-## 七、常见陷阱与避免方法
+## 八、常见陷阱与避免方法
 
 | 陷阱 | 为什么危险 | 如何避免 |
 |------|-----------|----------|
@@ -309,7 +331,7 @@ git commit -m "feat: add passive construction fallback"
 
 ---
 
-## 八、参考资源
+## 九、参考资源
 
 ### AI 编程工具
 - Aider: https://aider.chat
@@ -317,13 +339,13 @@ git commit -m "feat: add passive construction fallback"
 - Codex CLI: https://github.com/openai/codex
 - Claude Code: https://docs.anthropic.com/en/docs/claude-code
 
+### Python 包管理
+- uv 文档: https://docs.astral.sh/uv/
+- uv 迁移指南: https://docs.astral.sh/uv/guides/migration/
+
 ### 测试框架
 - pytest: https://docs.pytest.org/
 - pytest-cov（覆盖率）: https://pytest-cov.readthedocs.io/
-
-### 项目管理
-- 用 GitHub Issues / Projects 跟踪 Phase 1-4 的任务
-- 每个 Phase 作为一个 Milestone
 
 ---
 
@@ -331,9 +353,10 @@ git commit -m "feat: add passive construction fallback"
 
 你现在有一个**后端逻辑验证通过**的项目骨架。下一步不是写更多代码，而是：
 
-1. **本地安装依赖 + 配 Key**，跑通完整前端流程
-2. **选一个 AI CLI 工具**（推荐 Aider + Kimi）
-3. **写更多测试**，然后用 AI 辅助修改代码直到测试通过
-4. **不要急于 Phase 2-4**，先把 Phase 1 的闭环打磨到可用
+1. **安装 uv** → [官方安装指南](https://docs.astral.sh/uv/getting-started/installation/)
+2. **本地跑通完整流程** → `uv sync` → `uv run python scripts/test_backend.py` → `uv run streamlit run src/alto/app.py`
+3. **选一个 AI CLI 工具**（推荐 Aider + Kimi）
+4. **写更多测试**，然后用 AI 辅助修改代码直到测试通过
+5. **不要急于 Phase 2-4**，先把 Phase 1 的闭环打磨到可用
 
 龙虾这样的项目也是从一个最小原型开始，然后用 AI 工具 + 测试驱动的方式逐步迭代。区别在于他们有 CI/CD 和团队，你作为个人开发者，更需要**测试 + AI 辅助 + Git 版本控制**这三根支柱。

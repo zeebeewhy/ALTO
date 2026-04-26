@@ -1,6 +1,10 @@
 """Working Memory: current session temporary state.
 
 Theory: ACT-R working memory (7 +/- 2 chunks capacity) + conversation context.
+
+Note: We maintain TWO turn histories:
+- turn_history: ACT-R constrained pedagogical working memory (7+/-2 chunks)
+- conversation: dialogue engine context (unbounded, compressible, topic-aware)
 """
 
 import time
@@ -8,6 +12,7 @@ from typing import Dict, List, Optional
 from collections import deque
 
 from alto.config import get_config
+from alto.conversation.context import ConversationContext
 
 
 class WorkingMemory:
@@ -15,9 +20,12 @@ class WorkingMemory:
 
     Capacity-limited (default 7 chunks) following ACT-R constraints.
     Old chunks are pushed out when capacity is exceeded.
+
+    Also holds the ConversationContext — the dialogue engine's view of the
+    conversation, separate from pedagogical memory.
     """
 
-    def __init__(self):
+    def __init__(self, user_id: str = "", storage_path: Optional[str] = None):
         self.current_target: Optional[str] = None
         self.turn_history: List[Dict] = []
         self.pending_errors: List[Dict] = []
@@ -25,18 +33,28 @@ class WorkingMemory:
         self.session_start: float = time.time()
         self.interaction_count: int = 0
 
+        # Dialogue engine context (separate from pedagogical working memory)
+        self.conversation = ConversationContext(
+            user_id=user_id,
+            storage_path=storage_path or "./data/memory",
+        )
+
     def push_turn(self, role: str, content: str, meta: Optional[Dict] = None) -> None:
         """Add a conversational turn to working memory."""
         cfg = get_config()
-        self.turn_history.append({
+        turn = {
             "role": role,
             "content": content,
             "meta": meta or {},
             "timestamp": time.time(),
-        })
+        }
+        self.turn_history.append(turn)
         self.interaction_count += 1
 
-        # Capacity limit: ACT-R 7 +/- 2 chunks
+        # Also push to conversation context (dialogue engine layer)
+        self.conversation.add_turn(role, content, meta)
+
+        # Capacity limit: ACT-R 7 +/- 2 chunks (pedagogical working memory only)
         capacity = cfg.memory.working_memory_capacity
         if len(self.turn_history) > capacity + 2:
             self.turn_history = self.turn_history[-(capacity + 2):]

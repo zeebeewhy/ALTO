@@ -1,4 +1,4 @@
-# 构式语法语言学习系统
+# ALTO — Adaptive Learning Tutor Orchestrator
 
 A neuro-symbolic, multi-layer language tutoring system that combines Construction Grammar theory with LLM-powered interaction and ACT-R inspired cognitive state tracking.
 
@@ -22,66 +22,81 @@ L0  MetaOrchestrator    — Layer coordination, ZPD scaffolding, noise filtering
 
 ### Prerequisites
 
-- Python >= 3.10
-- An OpenAI-compatible API key (Kimi / OpenAI / etc.)
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) — modern Python package manager (replaces pip + venv)
+- Python >= 3.10 (uv will auto-install if missing)
+- An OpenAI-compatible API key
 
 ### Step 1: Get API Key
 
-- **Moonshot (Kimi)**: https://platform.moonshot.cn/ → 注册 → 创建 API Key → 获取免费额度
-- 系统只调用 LLM API（模型不部署在本地），Key 只保存在你电脑上的 `.env` 文件中
+ALTO 支持多种 LLM Provider，请选择你有额度的方式：
 
-### Step 2: Clone / Download
+**方式 A：Kimi Code API（推荐，如果你有 Kimi 会员订阅）**
+- 访问 https://www.kimi.com/code/console
+- 使用 Kimi 会员账号登录
+- 创建 API Key（格式以 `sk-kimi-` 开头）
+- 这是 Kimi Code 订阅权益，与 Moonshot 开放平台额度不互通
+
+**方式 B：Moonshot Open Platform（如果你有充值额度）**
+- 访问 https://platform.moonshot.cn → 注册 → 创建 API Key
+- 新用户有免费测试额度
+
+**方式 C：OpenAI / DeepSeek / OpenRouter**
+- 使用对应平台的 API Key
+
+所有方式都是 OpenAI-compatible 协议，系统只调用 LLM API（模型不部署在本地），Key 只保存在你电脑上的 `.env` 文件中。
+
+### Step 2: Install & Run
 
 ```bash
+# 1. 进入项目目录
 cd project_directory
-```
 
-### Step 3: One-Click Start
+# 2. 同步依赖（uv 自动创建 .venv 并安装所有包）
+uv sync
 
-**Linux / macOS:**
-```bash
-bash scripts/start.sh
-```
+# 3. 下载 spaCy 英语模型
+uv run python -m spacy download en_core_web_sm
 
-**Windows:**
-```cmd
-scripts\start.bat
-```
-
-脚本会自动完成：创建虚拟环境 → 安装依赖 → 下载 spaCy 模型 → 测试 API → 启动 Streamlit
-
-### Manual Setup (if scripts fail)
-
-```bash
-# Create virtual environment
-python -m venv .venv
-source .venv/bin/activate  # Linux/Mac
-# .venv\Scripts\activate   # Windows
-
-# Install dependencies
-pip install -e .
-
-# Download spaCy model (for L3 symbolic diagnosis)
-python -m spacy download en_core_web_sm
-
-# Configure API
-# Option A: Create .env file
+# 4. 配置 API Key
 cp .env.example .env
-# Edit .env with your API key
+# 编辑 .env，取消对应 Provider 的注释并填入 Key
 
-# Option B: Environment variables
-export LLM_API_KEY="sk-your-key"
-export LLM_BASE_URL="https://api.moonshot.cn/v1"
-export LLM_MODEL_NAME="kimi-latest"
+# 5. 验证后端逻辑（不需要 API Key）
+uv run python scripts/test_backend.py
 
-# Verify connectivity
-python scripts/test_connection.py
+# 6. 验证 API 连通性（需要 Key）
+uv run python scripts/test_connection.py
 
-# Launch
-streamlit run src/alto/app.py
+# 7. 启动 Streamlit 前端
+uv run streamlit run src/alto/app.py
 ```
 
-Open http://localhost:8501 in your browser.
+浏览器自动打开 http://localhost:8501。
+
+### Daily Commands
+
+```bash
+# 运行后端测试
+uv run python scripts/test_backend.py
+
+# 运行 API 连通性测试
+uv run python scripts/test_connection.py
+
+# 启动前端
+uv run streamlit run src/alto/app.py
+
+# 添加新依赖
+uv add <package>
+
+# 添加开发依赖
+uv add --dev <package>
+
+# 更新所有依赖
+uv sync --upgrade
+
+# 运行 pytest
+uv run pytest
+```
 
 ## Security: How Your API Key is Protected
 
@@ -93,7 +108,7 @@ Open http://localhost:8501 in your browser.
 | **硬编码在代码** | Key 从环境变量/`.env` 读取，代码仓库无 Key |
 | **他人访问你的界面** | 默认只监听 localhost，除非手动改为 0.0.0.0 |
 
-**系统不部署任何模型。** 所有推理都在 Moonshot/OpenAI 服务器完成，你的笔记本只发送文本请求、接收文本响应。
+**系统不部署任何模型。** 所有推理都在 LLM 提供商服务器完成，你的笔记本只发送文本请求、接收文本响应。
 
 ## Project Structure
 
@@ -116,15 +131,15 @@ Open http://localhost:8501 in your browser.
 │   │   └── orchestrator.py # Meta-orchestrator (L0)
 │   └── construction/       # Construction grammar layer
 ├── scripts/
-│   ├── start.sh            # One-click launch (Linux/Mac)
-│   ├── start.bat           # One-click launch (Windows)
 │   ├── run.py              # CLI launcher
+│   ├── test_backend.py     # Backend logic verification (no LLM needed)
 │   └── test_connection.py  # API connectivity checker
 ├── tests/
-├── pyproject.toml
-├── .env.example
+├── pyproject.toml          # Project config + dependencies (uv-managed)
+├── .env.example            # API configuration template
 ├── .gitignore              # Protects .env and data/
-└── README.md
+├── README.md
+└── DEVELOPER.md            # Developer workflow guide
 ```
 
 ## Theory Mapping
@@ -153,7 +168,7 @@ Open http://localhost:8501 in your browser.
 ### Add PyFCG integration (for real FCG parsing)
 
 ```bash
-pip install pyfcg
+uv add pyfcg
 ```
 
 Then in `neuro_symbolic/diagnostic.py`:
@@ -167,7 +182,7 @@ report.fcg_result = fcg_result
 ### Add C2xG as construction discovery frontend
 
 ```bash
-pip install c2xg
+uv add c2xg
 ```
 
 ```python
